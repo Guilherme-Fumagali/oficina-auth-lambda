@@ -14,7 +14,7 @@ jobs:
   destroy:
     name: Destroy (${{ github.ref_name == 'main' && 'prod' || 'staging' }})
     runs-on: ubuntu-latest
-    environment: prod
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
