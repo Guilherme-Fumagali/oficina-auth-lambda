@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Autenticação por CPF do Tech Challenge Fase 3.
+
+  Duas funções: oficina-auth emite o JWT a partir do CPF; oficina-authorizer valida o
+  token nas rotas protegidas do API Gateway. Ver SPEC-01 e SPEC-02.
+
+Parameters:
+  Ambiente:
+    Type: String
+    Default: prod
+    AllowedValues: [staging, prod]
+  SubnetIds:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /oficina/prod/private-subnet-ids
+    Description: Subnets privadas publicadas pelo repositório oficina-infra-k8s.
+  SecurityGroupId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /oficina/prod/lambda-security-group-id
+
+Globals:
+  Function:
+    Runtime: java21
+    # arm64 é mais barato que x86 na tabela do Lambda (Aula 02 de Serverless).
+    Architectures: [arm64]
+    MemorySize: 512
+    Timeout: 10
+    PermissionsBoundary: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/oficina-lambda-boundary'
+    Environment:
+      Variables:
+        SSM_PREFIX: !Sub '/oficina/${Ambiente}'
+    VpcConfig:
+      SubnetIds: !Ref SubnetIds
+      SecurityGroupIds: [!Ref SecurityGroupId]
+
+Resources:
+
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'oficina-auth-${Ambiente}'
+      CodeUri: .
+      Handler: com.oficina.auth.handler.AuthHandler::handleRequest
+      Description: Valida CPF, consulta cliente e emite JWT.
+      # Teto de conexões contra o RDS db.t4g.micro, que suporta ~85 (SPEC-01 §7).
+      ReservedConcurrentExecutions: 10
+      Policies:
+        - VPCAccessPolicy: {}
+        - SSMParameterWithSlashPrefixReadPolicy:
+            ParameterName: !Sub '/oficina/${Ambiente}/*'
+        - Statement:
+            - Effect: Allow
+              Action: [kms:Decrypt]
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  'kms:ViaService': !Sub 'ssm.${AWS::Region}.amazonaws.com'
+
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'oficina-authorizer-${Ambiente}'
+      CodeUri: .
+      Handler: com.oficina.auth.handler.AuthorizerHandler::handleRequest
+      Description: Valida o JWT das rotas protegidas do API Gateway.
+      MemorySize: 256
+      Timeout: 5
+      # Não acessa banco: só verifica assinatura. Fora da VPC, o cold start é menor.
+      VpcConfig: !Ref AWS::NoValue
+      Policies:
+        - SSMParameterWithSlashPrefixReadPolicy:
+            ParameterName: !Sub '/oficina/${Ambiente}/*'
+        - Statement:
+            - Effect: Allow
+              Action: [kms:Decrypt]
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  'kms:ViaService': !Sub 'ssm.${AWS::Region}.amazonaws.com'
+
+  # ARNs publicados para o repositório oficina-infra-k8s montar as rotas do gateway.
+  # É o contrato entre repositórios descrito na SPEC-05 §5.
+  AuthFunctionArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/oficina/${Ambiente}/auth-lambda-arn'
+      Type: String
+      Value: !GetAtt AuthFunction.Arn
+
+  AuthorizerFunctionArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/oficina/${Ambiente}/authorizer-lambda-arn'
+      Type: String
+      Value: !GetAtt AuthorizerFunction.Arn
+
+Outputs:
+  AuthFunctionArn:
+    Value: !GetAtt AuthFunction.Arn
+  AuthorizerFunctionArn:
+    Value: !GetAtt AuthorizerFunction.Arn

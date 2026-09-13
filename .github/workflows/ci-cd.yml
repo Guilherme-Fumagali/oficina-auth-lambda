@@ -1,0 +1,101 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+          cache: maven
+
+      - run: ./mvnw -B verify
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+          retention-days: 5
+
+  deploy:
+    name: Deploy (prod)
+    needs: build-and-test
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AMBIENTE: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+      - name: Conferir rede do oficina-infra-k8s
+        id: rede
+        run: |
+          if SAIDA=$(aws ssm get-parameter --name "/oficina/${AMBIENTE}/private-subnet-ids" 2>&1); then
+            echo "existe=true" >> "$GITHUB_OUTPUT"
+          elif grep -q ParameterNotFound <<<"$SAIDA"; then
+            echo "::notice::Cluster do oficina-infra-k8s desligado, deploy pulado."
+            echo "existe=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$SAIDA"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.rede.outputs.existe == 'true'
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+          cache: maven
+
+      - uses: aws-actions/setup-sam@v2
+        if: steps.rede.outputs.existe == 'true'
+        with:
+          use-installer: true
+
+      - if: steps.rede.outputs.existe == 'true'
+        run: sam validate --lint
+
+      - if: steps.rede.outputs.existe == 'true'
+        run: sam build
+
+      - name: Deploy
+        if: steps.rede.outputs.existe == 'true'
+        run: |
+          sam deploy \
+            --stack-name oficina-auth-lambda-${AMBIENTE} \
+            --parameter-overrides Ambiente=${AMBIENTE} \
+                SubnetIds=/oficina/${AMBIENTE}/private-subnet-ids \
+                SecurityGroupId=/oficina/${AMBIENTE}/lambda-security-group-id \
+            --capabilities CAPABILITY_IAM \
+            --resolve-s3 \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset
+
+      - name: Conferir ARNs publicados
+        if: steps.rede.outputs.existe == 'true'
+        run: |
+          aws ssm get-parameter --name "/oficina/${AMBIENTE}/auth-lambda-arn" --query 'Parameter.Value' --output text
+          aws ssm get-parameter --name "/oficina/${AMBIENTE}/authorizer-lambda-arn" --query 'Parameter.Value' --output text

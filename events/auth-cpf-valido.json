@@ -1,0 +1,11 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /auth",
+  "rawPath": "/auth",
+  "headers": { "content-type": "application/json" },
+  "requestContext": {
+    "http": { "method": "POST", "path": "/auth", "protocol": "HTTP/1.1" }
+  },
+  "body": "{\"cpf\":\"529.982.247-25\"}",
+  "isBase64Encoded": false
+}

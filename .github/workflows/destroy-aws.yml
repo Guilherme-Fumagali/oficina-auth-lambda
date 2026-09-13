@@ -1,0 +1,37 @@
+name: Destroy AWS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AMBIENTE: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+
+jobs:
+  destroy:
+    name: Destroy (${{ github.ref_name == 'main' && 'prod' || 'staging' }})
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Delete
+        run: sam delete --stack-name "oficina-auth-lambda-${AMBIENTE}" --region us-east-1 --no-prompts
+
+      - name: Conferir que nada sobrou
+        run: |
+          SAIDA=$(aws cloudformation describe-stacks --stack-name "oficina-auth-lambda-${AMBIENTE}" 2>&1 || true)
+          case "$SAIDA" in
+            *"does not exist"*) echo "Stack oficina-auth-lambda-${AMBIENTE} removida." ;;
+            *) echo "::error::Stack ainda existe ou não foi possível conferir: $SAIDA"; exit 1 ;;
+          esac
