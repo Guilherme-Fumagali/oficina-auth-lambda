@@ -5,3 +5,4 @@ target/
 samconfig.toml
 .idea/
 *.iml
+env.local.json
