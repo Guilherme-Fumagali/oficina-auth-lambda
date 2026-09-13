@@ -1,0 +1,9 @@
+{
+  "version": "2.0",
+  "type": "REQUEST",
+  "routeArn": "arn:aws:execute-api:us-east-1:000000000000:abc123/prod/GET/api/ordens",
+  "headers": {},
+  "requestContext": {
+    "http": { "method": "GET", "path": "/api/ordens", "protocol": "HTTP/1.1" }
+  }
+}
