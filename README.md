@@ -123,7 +123,7 @@ Eventos prontos em `events/`: CPF válido, CPF inválido e authorizer sem token.
 
 ## Deploy
 
-Automático no merge em `main`, pelo environment `prod`. Branches rodam só build e testes. Se o cluster de `oficina-infra-k8s` estiver desligado, o deploy é pulado com aviso, sem falhar. `main` é protegida, merge só por Pull Request com o check `Build & testes`.
+Automático, por ambiente: merge em `develop` publica `oficina-auth-lambda-staging` (homologação), merge em `main` publica `oficina-auth-lambda-prod` (produção, com aprovação no environment `prod`). Outras branches rodam só build e testes. Se o cluster do ambiente estiver desligado, o deploy é pulado com aviso, sem pedir aprovação. `develop` e `main` são protegidas, merge só por Pull Request com o check `Build & testes`.
 
 **Ordem entre repositórios importa.** Este repo consome a rede publicada por `oficina-infra-k8s` e a migration `V6` aplicada por `oficina-api`:
 
@@ -138,15 +138,17 @@ Automático no merge em `main`, pelo environment `prod`. Branches rodam só buil
 Deploy manual:
 
 ```bash
-sam deploy --stack-name oficina-auth-lambda-prod \
-  --parameter-overrides Ambiente=prod \
+sam deploy --stack-name oficina-auth-lambda-staging \
+  --parameter-overrides Ambiente=staging \
+      SubnetIds=/oficina/staging/private-subnet-ids \
+      SecurityGroupId=/oficina/staging/lambda-security-group-id \
   --capabilities CAPABILITY_IAM --resolve-s3
 ```
 
 Destroy pelo workflow **Destroy AWS**, **primeiro** entre os quatro repositórios: as ENIs da Lambda na VPC impedem o cluster de apagar subnet e security group. Local:
 
 ```bash
-sam delete --stack-name oficina-auth-lambda-prod --no-prompts
+sam delete --stack-name oficina-auth-lambda-staging --no-prompts
 ```
 
 ## Contrato com os outros repositórios
