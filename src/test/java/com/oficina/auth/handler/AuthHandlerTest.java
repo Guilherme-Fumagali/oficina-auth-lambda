@@ -86,41 +86,43 @@ class AuthHandlerTest {
     }
 
     @Test
-    void clienteInexistenteDevolve404() throws Exception {
+    void clienteInexistenteDevolve401Generico() throws Exception {
         when(repositorio.buscarPorCpf(any())).thenReturn(Optional.empty());
 
         var resposta = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
-        assertThat(resposta.getStatusCode()).isEqualTo(404);
-        assertThat(JSON.readTree(resposta.getBody()).get("erro").asText())
-            .isEqualTo("CLIENTE_NAO_ENCONTRADO");
+        assertThat(resposta.getStatusCode()).isEqualTo(401);
+        var corpo = JSON.readTree(resposta.getBody());
+        assertThat(corpo.get("erro").asText()).isEqualTo("AUTENTICACAO_RECUSADA");
+        assertThat(corpo.get("mensagem").asText()).isEqualTo(ErroResponse.FALHA_GENERICA);
+        assertThat(String.join("\n", contexto.linhas)).contains("resultado=nao_encontrado");
     }
 
     @ParameterizedTest
     @EnumSource(value = StatusCliente.class, names = "ATIVO", mode = Mode.EXCLUDE)
-    void clienteForaDeAtivoDevolve403(StatusCliente status) throws Exception {
+    void clienteForaDeAtivoDevolve401Generico(StatusCliente status) throws Exception {
         when(repositorio.buscarPorCpf(any()))
             .thenReturn(Optional.of(new Cliente(UUID.randomUUID(), "João", status)));
 
         var resposta = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
-        assertThat(resposta.getStatusCode()).isEqualTo(403);
-        assertThat(JSON.readTree(resposta.getBody()).get("erro").asText()).isEqualTo("CLIENTE_INATIVO");
+        assertThat(resposta.getStatusCode()).isEqualTo(401);
+        assertThat(JSON.readTree(resposta.getBody()).get("erro").asText()).isEqualTo("AUTENTICACAO_RECUSADA");
+        assertThat(String.join("\n", contexto.linhas)).contains("resultado=sem_permissao");
     }
 
     @Test
-    void mensagemDe404EDe403DevemSerIndistinguiveis() throws Exception {
+    void cpfSemCadastroECadastroBloqueadoTemRespostaIdentica() throws Exception {
         when(repositorio.buscarPorCpf(any())).thenReturn(Optional.empty());
-        var naoEncontrado = JSON.readTree(handler.handleRequest(evento(CPF_VALIDO), contexto).getBody());
+        var naoEncontrado = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
         when(repositorio.buscarPorCpf(any()))
             .thenReturn(Optional.of(new Cliente(UUID.randomUUID(), "João", StatusCliente.BLOQUEADO)));
-        var bloqueado = JSON.readTree(handler.handleRequest(evento(CPF_VALIDO), contexto).getBody());
+        var bloqueado = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
-        // Enumeração de CPFs válidos fica impossível pelo corpo da resposta (SPEC-01 §8).
-        assertThat(naoEncontrado.get("mensagem").asText())
-            .isEqualTo(bloqueado.get("mensagem").asText())
-            .isEqualTo(ErroResponse.FALHA_GENERICA);
+        assertThat(bloqueado.getStatusCode()).isEqualTo(naoEncontrado.getStatusCode());
+        assertThat(bloqueado.getHeaders()).isEqualTo(naoEncontrado.getHeaders());
+        assertThat(bloqueado.getBody()).isEqualTo(naoEncontrado.getBody());
     }
 
     @Test
@@ -175,26 +177,17 @@ class AuthHandlerTest {
     }
 
     @Test
-    void funcionarioInexistenteDevolve404ComMensagemGenerica() throws Exception {
+    void funcionarioInexistenteEInativoTemRespostaIdentica() throws Exception {
         when(funcionarios.buscarPorCpf(any())).thenReturn(Optional.empty());
+        var naoEncontrado = handler.handleRequest(eventoFuncionario(CPF_VALIDO), contexto);
 
-        var resposta = handler.handleRequest(eventoFuncionario(CPF_VALIDO), contexto);
-
-        assertThat(resposta.getStatusCode()).isEqualTo(404);
-        var corpo = JSON.readTree(resposta.getBody());
-        assertThat(corpo.get("erro").asText()).isEqualTo("FUNCIONARIO_NAO_ENCONTRADO");
-        assertThat(corpo.get("mensagem").asText()).isEqualTo(ErroResponse.FALHA_GENERICA);
-    }
-
-    @Test
-    void funcionarioInativoDevolve403() throws Exception {
         when(funcionarios.buscarPorCpf(any()))
             .thenReturn(Optional.of(new Funcionario(UUID.randomUUID(), "Maria", false)));
+        var inativo = handler.handleRequest(eventoFuncionario(CPF_VALIDO), contexto);
 
-        var resposta = handler.handleRequest(eventoFuncionario(CPF_VALIDO), contexto);
-
-        assertThat(resposta.getStatusCode()).isEqualTo(403);
-        assertThat(JSON.readTree(resposta.getBody()).get("erro").asText()).isEqualTo("FUNCIONARIO_INATIVO");
+        assertThat(naoEncontrado.getStatusCode()).isEqualTo(401);
+        assertThat(inativo.getStatusCode()).isEqualTo(401);
+        assertThat(inativo.getBody()).isEqualTo(naoEncontrado.getBody());
     }
 
     private APIGatewayV2HTTPEvent evento(String cpf) {

@@ -62,17 +62,13 @@ public class AuthHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
 
             if (encontrado.isEmpty()) {
                 logar(context, "nao_encontrado", papel, cpf, null);
-                return responder(404, papel == Papel.FUNCIONARIO
-                    ? ErroResponse.funcionarioNaoEncontrado()
-                    : ErroResponse.clienteNaoEncontrado());
+                return responder(401, ErroResponse.autenticacaoRecusada());
             }
 
             var identidade = encontrado.get();
             if (!identidade.podeAutenticar()) {
                 logar(context, "sem_permissao", papel, cpf, identidade);
-                return responder(403, papel == Papel.FUNCIONARIO
-                    ? ErroResponse.funcionarioInativo()
-                    : ErroResponse.clienteInativo());
+                return responder(401, ErroResponse.autenticacaoRecusada());
             }
 
             logar(context, "autenticado", papel, cpf, identidade);
