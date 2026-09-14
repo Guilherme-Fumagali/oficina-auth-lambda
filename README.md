@@ -73,11 +73,10 @@ O CPF é aceito com ou sem máscara. `POST /auth` consulta a tabela `clientes` e
 | Status | Código | Situação |
 |---|---|---|
 | 400 | `CPF_INVALIDO` | CPF ausente, malformado ou com dígito verificador incorreto; o banco não é consultado |
-| 404 | `CLIENTE_NAO_ENCONTRADO` ou `FUNCIONARIO_NAO_ENCONTRADO` | CPF válido sem cadastro |
-| 403 | `CLIENTE_INATIVO` ou `FUNCIONARIO_INATIVO` | cliente `INATIVO` ou `BLOQUEADO`; funcionário `INATIVO` |
+| 401 | `AUTENTICACAO_RECUSADA` | CPF válido sem cadastro, cliente `INATIVO` ou `BLOQUEADO`, ou funcionário `INATIVO` |
 | 500 | `ERRO_INTERNO` | falha de banco ou de assinatura, sem detalhes na resposta |
 
-As respostas 404 e 403 usam a mesma mensagem. O CPF é registrado em log apenas com os três últimos dígitos.
+CPF sem cadastro e cadastro sem permissão recebem exatamente a mesma resposta (status, cabeçalhos e corpo), para que o endpoint não permita descobrir quais CPFs estão cadastrados. O motivo (`nao_encontrado` ou `sem_permissao`) é registrado apenas no log, com o CPF limitado aos três últimos dígitos.
 
 ### Claims do token
 
@@ -118,13 +117,13 @@ Eventos de exemplo em `events/`: CPF válido, CPF inválido e authorizer sem tok
 
 ## Testes
 
-São 36 métodos de teste, que resultam em 45 casos executados por causa dos testes parametrizados. Cobertura: 77% de linhas e 76% de branches; o build falha abaixo de 75% e 70%, respectivamente.
+São 35 métodos de teste, que resultam em 44 casos executados por causa dos testes parametrizados. Cobertura: 77% de linhas e 76% de branches; o build falha abaixo de 75% e 70%, respectivamente.
 
 | Classe | Métodos | O que verifica |
 |---|---|---|
 | `CpfTest` | 5 | CPF válido com e sem máscara, dígito verificador, tamanho incorreto, CNPJ recusado e mascaramento para log |
 | `TokenTest` | 9 | token emitido aceito pelo validador, `sub` com UUID, papel vindo da identidade, recusa de outra chave, payload adulterado, token sem assinatura e entrada vazia, tamanho mínimo da chave, leitura do header `Bearer` |
-| `AuthHandlerTest` | 12 | cliente ativo recebe token com papel `CLIENTE`; funcionário ativo recebe token com papel `FUNCIONARIO` sem consultar clientes; CPF malformado retorna 400 sem consultar o banco; corpo ausente; cliente ou funcionário inexistente (404) e inativo (403) com a mesma mensagem; falha de banco retorna 500 sem detalhes; CPF completo nunca aparece no log |
+| `AuthHandlerTest` | 11 | cliente ativo recebe token com papel `CLIENTE`; funcionário ativo recebe token com papel `FUNCIONARIO` sem consultar clientes; CPF malformado retorna 400 sem consultar o banco; corpo ausente; cliente ou funcionário inexistente e inativo recebem 401 com resposta idêntica e motivo apenas no log; falha de banco retorna 500 sem detalhes; CPF completo nunca aparece no log |
 | `AuthorizerHandlerTest` | 5 | token válido autorizado com contexto; header com qualquer capitalização; ausência de header, chave diferente e esquema diferente de `Bearer` negados |
 | `RepositoriosPostgresTest` | 5 | consultas reais em PostgreSQL 16 via Testcontainers: cliente ativo e bloqueado, funcionário ativo e inativo, CPF sem cadastro e falha de conexão |
 
