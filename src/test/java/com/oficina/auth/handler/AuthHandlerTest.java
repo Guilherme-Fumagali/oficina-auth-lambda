@@ -4,10 +4,13 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.LambdaLogger;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.oficina.auth.banco.ConsultaException;
 import com.oficina.auth.cliente.Cliente;
 import com.oficina.auth.cliente.ClienteRepository;
 import com.oficina.auth.cliente.StatusCliente;
 import com.oficina.auth.dto.ErroResponse;
+import com.oficina.auth.funcionario.Funcionario;
+import com.oficina.auth.funcionario.FuncionarioRepository;
 import com.oficina.auth.token.TokenIssuer;
 import com.oficina.auth.token.TokenValidator;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,13 +42,14 @@ class AuthHandlerTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @Mock ClienteRepository repositorio;
+    @Mock FuncionarioRepository funcionarios;
 
     private AuthHandler handler;
     private ContextoFake contexto;
 
     @BeforeEach
     void setUp() {
-        handler = new AuthHandler(repositorio, new TokenIssuer(SEGREDO));
+        handler = new AuthHandler(repositorio, funcionarios, new TokenIssuer(SEGREDO));
         contexto = new ContextoFake();
     }
 
@@ -122,7 +126,7 @@ class AuthHandlerTest {
     @Test
     void falhaDeBancoDevolve500SemVazarDetalhe() throws Exception {
         when(repositorio.buscarPorCpf(any()))
-            .thenThrow(new ClienteRepository.ConsultaClienteException("conexão recusada", null));
+            .thenThrow(new ConsultaException("conexão recusada", null));
 
         var resposta = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
@@ -143,8 +147,66 @@ class AuthHandlerTest {
             .contains("***725");
     }
 
+    @Test
+    void clienteRecebeTokenComPapelCliente() throws Exception {
+        when(repositorio.buscarPorCpf(any()))
+            .thenReturn(Optional.of(new Cliente(UUID.randomUUID(), "João", StatusCliente.ATIVO)));
+
+        var resposta = handler.handleRequest(evento(CPF_VALIDO), contexto);
+
+        var token = JSON.readTree(resposta.getBody()).get("accessToken").asText();
+        assertThat(new TokenValidator(SEGREDO).validar(token).orElseThrow().get("role")).isEqualTo("CLIENTE");
+        verify(funcionarios, never()).buscarPorCpf(any());
+    }
+
+    @Test
+    void funcionarioAtivoRecebeTokenComPapelFuncionario() throws Exception {
+        var id = UUID.randomUUID();
+        when(funcionarios.buscarPorCpf(any())).thenReturn(Optional.of(new Funcionario(id, "Maria", true)));
+
+        var resposta = handler.handleRequest(eventoFuncionario(CPF_VALIDO), contexto);
+
+        assertThat(resposta.getStatusCode()).isEqualTo(200);
+        var token = JSON.readTree(resposta.getBody()).get("accessToken").asText();
+        var claims = new TokenValidator(SEGREDO).validar(token).orElseThrow();
+        assertThat(claims.getSubject()).isEqualTo(id.toString());
+        assertThat(claims.get("role")).isEqualTo("FUNCIONARIO");
+        verify(repositorio, never()).buscarPorCpf(any());
+    }
+
+    @Test
+    void funcionarioInexistenteDevolve404ComMensagemGenerica() throws Exception {
+        when(funcionarios.buscarPorCpf(any())).thenReturn(Optional.empty());
+
+        var resposta = handler.handleRequest(eventoFuncionario(CPF_VALIDO), contexto);
+
+        assertThat(resposta.getStatusCode()).isEqualTo(404);
+        var corpo = JSON.readTree(resposta.getBody());
+        assertThat(corpo.get("erro").asText()).isEqualTo("FUNCIONARIO_NAO_ENCONTRADO");
+        assertThat(corpo.get("mensagem").asText()).isEqualTo(ErroResponse.FALHA_GENERICA);
+    }
+
+    @Test
+    void funcionarioInativoDevolve403() throws Exception {
+        when(funcionarios.buscarPorCpf(any()))
+            .thenReturn(Optional.of(new Funcionario(UUID.randomUUID(), "Maria", false)));
+
+        var resposta = handler.handleRequest(eventoFuncionario(CPF_VALIDO), contexto);
+
+        assertThat(resposta.getStatusCode()).isEqualTo(403);
+        assertThat(JSON.readTree(resposta.getBody()).get("erro").asText()).isEqualTo("FUNCIONARIO_INATIVO");
+    }
+
     private APIGatewayV2HTTPEvent evento(String cpf) {
         return APIGatewayV2HTTPEvent.builder()
+            .withRouteKey("POST /auth")
+            .withBody("{\"cpf\":\"" + cpf + "\"}")
+            .build();
+    }
+
+    private APIGatewayV2HTTPEvent eventoFuncionario(String cpf) {
+        return APIGatewayV2HTTPEvent.builder()
+            .withRouteKey(AuthHandler.ROTA_FUNCIONARIOS)
             .withBody("{\"cpf\":\"" + cpf + "\"}")
             .build();
     }

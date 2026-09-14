@@ -24,6 +24,14 @@ public record ErroResponse(String erro, String mensagem) {
         return new ErroResponse("CLIENTE_INATIVO", FALHA_GENERICA);
     }
 
+    public static ErroResponse funcionarioNaoEncontrado() {
+        return new ErroResponse("FUNCIONARIO_NAO_ENCONTRADO", FALHA_GENERICA);
+    }
+
+    public static ErroResponse funcionarioInativo() {
+        return new ErroResponse("FUNCIONARIO_INATIVO", FALHA_GENERICA);
+    }
+
     public static ErroResponse interno() {
         return new ErroResponse("ERRO_INTERNO", "Erro ao processar a autenticação.");
     }
