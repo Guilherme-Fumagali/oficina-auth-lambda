@@ -18,6 +18,14 @@ Parameters:
   SecurityGroupId:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /oficina/prod/lambda-security-group-id
+  ConcorrenciaReservada:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    Description: Execuções simultâneas reservadas para oficina-auth. 0 não reserva, usando o limite da conta.
+
+Conditions:
+  ReservaConcorrencia: !Not [!Equals [!Ref ConcorrenciaReservada, 0]]
 
 Globals:
   Function:
@@ -43,8 +51,7 @@ Resources:
       CodeUri: .
       Handler: com.oficina.auth.handler.AuthHandler::handleRequest
       Description: Valida CPF, consulta cliente e emite JWT.
-      # Teto de conexões contra o RDS db.t4g.micro, que suporta ~85 (SPEC-01 §7).
-      ReservedConcurrentExecutions: 10
+      ReservedConcurrentExecutions: !If [ReservaConcorrencia, !Ref ConcorrenciaReservada, !Ref AWS::NoValue]
       Policies:
         - VPCAccessPolicy: {}
         - SSMParameterWithSlashPrefixReadPolicy:
