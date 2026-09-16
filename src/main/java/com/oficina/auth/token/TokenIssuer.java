@@ -1,7 +1,7 @@
 package com.oficina.auth.token;
 
-import com.oficina.auth.cliente.Cliente;
 import com.oficina.auth.cpf.Cpf;
+import com.oficina.auth.identidade.Identidade;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 
@@ -25,14 +25,14 @@ public class TokenIssuer {
         this.chave = Keys.hmacShaKeyFor(segredo.getBytes(StandardCharsets.UTF_8));
     }
 
-    public String emitir(Cliente cliente, Cpf cpf) {
+    public String emitir(Identidade identidade, Cpf cpf) {
         var agora = Instant.now();
         return Jwts.builder()
-            .subject(cliente.id().toString())
+            .subject(identidade.id().toString())
             .issuer(ISSUER)
             .claim("cpf", cpf.valor())
-            .claim("nome", cliente.nome())
-            .claim("role", "CLIENTE")
+            .claim("nome", identidade.nome())
+            .claim("role", identidade.papel().name())
             .issuedAt(Date.from(agora))
             .expiration(Date.from(agora.plusSeconds(EXPIRACAO_SEGUNDOS)))
             .signWith(chave)
