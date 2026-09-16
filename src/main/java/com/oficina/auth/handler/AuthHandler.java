@@ -5,7 +5,7 @@ import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.oficina.auth.cliente.Cliente;
+import com.oficina.auth.banco.ConexaoJdbc;
 import com.oficina.auth.cliente.ClienteRepository;
 import com.oficina.auth.config.Configuracao;
 import com.oficina.auth.cpf.Cpf;
@@ -13,6 +13,9 @@ import com.oficina.auth.cpf.CpfInvalidoException;
 import com.oficina.auth.dto.AutenticacaoRequest;
 import com.oficina.auth.dto.ErroResponse;
 import com.oficina.auth.dto.TokenResponse;
+import com.oficina.auth.funcionario.FuncionarioRepository;
+import com.oficina.auth.identidade.Identidade;
+import com.oficina.auth.identidade.Papel;
 import com.oficina.auth.token.TokenIssuer;
 
 import java.util.Map;
@@ -20,24 +23,31 @@ import java.util.Optional;
 
 public class AuthHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
 
+    static final String ROTA_FUNCIONARIOS = "POST /auth/funcionarios";
+
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private final ClienteRepository repositorio;
+    private final ClienteRepository clientes;
+    private final FuncionarioRepository funcionarios;
     private final TokenIssuer emissor;
 
     public AuthHandler() {
         var config = Configuracao.carregar();
-        this.repositorio = new ClienteRepository(config.jdbcUrl(), config.dbUsuario(), config.dbSenha());
+        var conexao = new ConexaoJdbc(config.jdbcUrl(), config.dbUsuario(), config.dbSenha());
+        this.clientes = new ClienteRepository(conexao);
+        this.funcionarios = new FuncionarioRepository(conexao);
         this.emissor = new TokenIssuer(config.jwtSecret());
     }
 
-    AuthHandler(ClienteRepository repositorio, TokenIssuer emissor) {
-        this.repositorio = repositorio;
+    AuthHandler(ClienteRepository clientes, FuncionarioRepository funcionarios, TokenIssuer emissor) {
+        this.clientes = clientes;
+        this.funcionarios = funcionarios;
         this.emissor = emissor;
     }
 
     @Override
     public APIGatewayV2HTTPResponse handleRequest(APIGatewayV2HTTPEvent evento, Context context) {
+        var papel = papelDaRota(evento);
         Cpf cpf;
         try {
             cpf = Cpf.de(extrairCpf(evento));
@@ -46,22 +56,24 @@ public class AuthHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         }
 
         try {
-            Optional<Cliente> encontrado = repositorio.buscarPorCpf(cpf);
+            Optional<? extends Identidade> encontrado = papel == Papel.FUNCIONARIO
+                ? funcionarios.buscarPorCpf(cpf)
+                : clientes.buscarPorCpf(cpf);
 
             if (encontrado.isEmpty()) {
-                logar(context, "cliente_nao_encontrado", cpf, null);
-                return responder(404, ErroResponse.clienteNaoEncontrado());
+                logar(context, "nao_encontrado", papel, cpf, null);
+                return responder(401, ErroResponse.autenticacaoRecusada());
             }
 
-            var cliente = encontrado.get();
-            if (!cliente.podeAutenticar()) {
-                logar(context, "cliente_sem_permissao", cpf, cliente);
-                return responder(403, ErroResponse.clienteInativo());
+            var identidade = encontrado.get();
+            if (!identidade.podeAutenticar()) {
+                logar(context, "sem_permissao", papel, cpf, identidade);
+                return responder(401, ErroResponse.autenticacaoRecusada());
             }
 
-            logar(context, "autenticado", cpf, cliente);
+            logar(context, "autenticado", papel, cpf, identidade);
             return responder(200, TokenResponse.bearer(
-                emissor.emitir(cliente, cpf), TokenIssuer.EXPIRACAO_SEGUNDOS));
+                emissor.emitir(identidade, cpf), TokenIssuer.EXPIRACAO_SEGUNDOS));
 
         } catch (Exception e) {
             if (context != null) {
@@ -69,6 +81,12 @@ public class AuthHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
             }
             return responder(500, ErroResponse.interno());
         }
+    }
+
+    private Papel papelDaRota(APIGatewayV2HTTPEvent evento) {
+        return evento != null && ROTA_FUNCIONARIOS.equals(evento.getRouteKey())
+            ? Papel.FUNCIONARIO
+            : Papel.CLIENTE;
     }
 
     private String extrairCpf(APIGatewayV2HTTPEvent evento) {
@@ -85,13 +103,13 @@ public class AuthHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         }
     }
 
-    private void logar(Context context, String resultado, Cpf cpf, Cliente cliente) {
+    private void logar(Context context, String resultado, Papel papel, Cpf cpf, Identidade identidade) {
         if (context == null) {
             return;
         }
         context.getLogger().log(String.format(
-            "resultado=%s cpf=%s cliente=%s",
-            resultado, cpf.mascarado(), cliente == null ? "-" : cliente.id()));
+            "resultado=%s papel=%s cpf=%s id=%s",
+            resultado, papel, cpf.mascarado(), identidade == null ? "-" : identidade.id()));
     }
 
     private APIGatewayV2HTTPResponse responder(int status, Object corpo) {

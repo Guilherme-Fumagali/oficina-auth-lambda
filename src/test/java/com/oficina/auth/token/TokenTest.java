@@ -2,6 +2,7 @@ package com.oficina.auth.token;
 
 import com.oficina.auth.cliente.Cliente;
 import com.oficina.auth.cliente.StatusCliente;
+import com.oficina.auth.funcionario.Funcionario;
 import com.oficina.auth.cpf.Cpf;
 import org.junit.jupiter.api.Test;
 
@@ -31,6 +32,14 @@ class TokenTest {
         assertThat(claims.get("cpf")).isEqualTo("52998224725");
         assertThat(claims.get("nome")).isEqualTo("João da Silva");
         assertThat(claims.get("role")).isEqualTo("CLIENTE");
+    }
+
+    @Test
+    void papelDoTokenVemDaIdentidadeAutenticada() {
+        var token = emissor.emitir(
+            new Funcionario(UUID.randomUUID(), "Maria", true), Cpf.de("52998224725"));
+
+        assertThat(validador.validar(token).orElseThrow().get("role")).isEqualTo("FUNCIONARIO");
     }
 
     @Test
