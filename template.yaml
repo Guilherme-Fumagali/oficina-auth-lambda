@@ -71,11 +71,6 @@ Resources:
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: false
 
-  IdentidadeRemetente:
-    Type: AWS::SES::EmailIdentity
-    Properties:
-      EmailIdentity: !Ref RemetenteEmail
-
   AuthFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -87,7 +82,7 @@ Resources:
       Environment:
         Variables:
           TABELA_DESAFIOS: !Ref TabelaDesafios
-          REMETENTE_EMAIL: !Ref IdentidadeRemetente
+          REMETENTE_EMAIL: !Ref RemetenteEmail
       Policies:
         - VPCAccessPolicy: {}
         - SSMParameterWithSlashPrefixReadPolicy:

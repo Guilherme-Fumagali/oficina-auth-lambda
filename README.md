@@ -196,7 +196,6 @@ A função de autenticação lê os quatro parâmetros em uma única chamada `Ge
 | Recurso | Configuração |
 |---|---|
 | Tabela `oficina-auth-desafios-<ambiente>` | DynamoDB sob demanda, chave `desafioId`, TTL em `expiraEm`, SSE habilitado, PITR desligado, removida junto com a stack |
-| Identidade SES do remetente | `AWS::SES::EmailIdentity` com o endereço de `RemetenteEmail` |
 | Permissões de `oficina-auth` | `DynamoDBCrudPolicy` na tabela (o boundary `oficina-lambda-boundary` restringe a `GetItem`, `PutItem`, `UpdateItem` e `DeleteItem`), `ses:SendEmail` com a condição `ses:FromAddress` igual ao remetente, leitura do SSM e `kms:Decrypt` via SSM |
 
 Item do desafio: `desafioId`, `sub`, `role`, `nome`, `cpf`, `codigoHash`, `tentativas` e `expiraEm` (epoch em segundos).
@@ -275,7 +274,7 @@ Workflow: [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml).
 
 As branches `develop` e `main` não aceitam push direto; o merge exige Pull Request com uma aprovação e o job **Build & testes** concluído com sucesso. Se o cluster do ambiente não existir, o deploy é ignorado com aviso, sem solicitar aprovação. A autenticação na AWS usa OIDC, com uma role exclusiva deste repositório, sem chave estática; as roles criadas para as funções recebem o permissions boundary `oficina-lambda-boundary`. O remetente é configurado na variável `REMETENTE_EMAIL` do repositório ou do environment.
 
-Destruição: workflow **Destroy AWS**, executado antes da remoção da rede, pois as interfaces de rede da função na VPC impedem a remoção das subnets e do security group do cluster. A tabela de desafios e a identidade do remetente são removidas com a stack.
+Destruição: workflow **Destroy AWS**, executado antes da remoção da rede, pois as interfaces de rede da função na VPC impedem a remoção das subnets e do security group do cluster. A tabela de desafios é removida com a stack; as identidades verificadas no SES permanecem na conta.
 
 ## Ordem de provisionamento
 
@@ -283,12 +282,12 @@ Destruição: workflow **Destroy AWS**, executado antes da remoção da rede, po
 1. oficina-infra-k8s   base e cluster (passada 1): rede, EKS, NLB, gateway endpoint de DynamoDB
                        e parâmetros jwt-secret, chave-interna, otp-segredo e nlb-dns
 2. infra/ dos serviços OS, Billing e Execution
-3. oficina-auth-lambda tabela, identidade do remetente, funções e ARNs no SSM (este repositório)
+3. oficina-auth-lambda tabela, funções e ARNs no SSM (este repositório)
 4. oficina-infra-k8s   cluster (passada 2): rotas da Lambda no API Gateway
 5. deploy dos serviços
 ```
 
-No primeiro deploy de cada provisionamento, o SES envia um e-mail de verificação ao remetente; os códigos só são entregues depois dessa confirmação. A primeira etapa responde 503 até que o OS Service com o endpoint interno esteja no ar.
+O remetente (`RemetenteEmail`) e, enquanto a conta estiver no sandbox, os destinatários precisam estar verificados no SES antes do primeiro envio. A verificação é feita uma vez na conta e não é gerenciada pela stack, porque recriar uma identidade já existente faria a criação da stack falhar. A primeira etapa responde 503 até que o OS Service com o endpoint interno esteja no ar.
 
 ## Integração com os outros repositórios
 
@@ -308,6 +307,6 @@ No primeiro deploy de cada provisionamento, o SES envia um e-mail de verificaç�
 - **Concorrência:** a conta utilizada tem limite total de 10 execuções simultâneas de Lambda, o que impede reservar concorrência (a AWS exige manter 10 execuções não reservadas). Por isso o parâmetro `ConcorrenciaReservada` tem padrão 0; com a cota ampliada, a reserva é definida no deploy.
 - **SES em sandbox:** enquanto a conta estiver no sandbox do SES, só destinatários verificados recebem o código, com cota diária reduzida. Na demonstração são usados os e-mails verificados da equipe.
 - **NAT como dependência do e-mail:** a função roda na VPC; o DynamoDB é alcançado pelo gateway endpoint, mas o SES e o SSM, lido na inicialização, são alcançados pela NAT. Sem a NAT, o código não é enviado e a primeira etapa não se completa.
-- **Verificação do remetente:** a identidade do remetente é criada e removida com a stack, então a verificação por e-mail se repete a cada provisionamento.
+- **Verificação do remetente:** feita uma vez na conta, fora da stack; trocar o remetente exige verificar o novo endereço antes do deploy.
 - **Sinais residuais de enumeração:** o conteúdo da resposta não diferencia os CPFs, mas o processamento de um cadastro ativo inclui a gravação e o envio, o que alonga o tempo de resposta; a resposta 503 por falha do SES também só ocorre para cadastros ativos. Esses sinais não são tratados.
 - **Validação de CPF duplicada:** a regra também existe em `CpfCnpj`, no OS Service. `CpfTest` reproduz os mesmos casos-limite do teste do serviço para evitar divergência (DT-08).
