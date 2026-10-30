@@ -1,10 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Autenticação por CPF do Tech Challenge Fase 3.
+  Autenticação por CPF com segundo fator do Tech Challenge Fase 4.
 
-  Duas funções: oficina-auth emite o JWT a partir do CPF; oficina-authorizer valida o
-  token nas rotas protegidas do API Gateway. Ver SPEC-01 e SPEC-02.
+  Duas funções: oficina-auth consulta a identidade no OS Service, envia um código de uso
+  único por e-mail e emite o JWT após a confirmação; oficina-authorizer valida o token nas
+  rotas protegidas do API Gateway. Ver SPEC-13.
 
 Parameters:
   Ambiente:
@@ -18,6 +19,11 @@ Parameters:
   SecurityGroupId:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /oficina/prod/lambda-security-group-id
+  RemetenteEmail:
+    Type: String
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    ConstraintDescription: informe um endereço de e-mail.
+    Description: Remetente dos códigos de acesso; a identidade é criada no SES por esta stack.
   ConcorrenciaReservada:
     Type: Number
     Default: 0
@@ -44,18 +50,50 @@ Globals:
 
 Resources:
 
+  TabelaDesafios:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub 'oficina-auth-desafios-${Ambiente}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: desafioId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: desafioId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiraEm
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: false
+
+  IdentidadeRemetente:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref RemetenteEmail
+
   AuthFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'oficina-auth-${Ambiente}'
       CodeUri: .
       Handler: com.oficina.auth.handler.AuthHandler::handleRequest
-      Description: Valida CPF, consulta cliente e emite JWT.
+      Description: Consulta o OS Service, envia o código por e-mail e emite o JWT após a confirmação.
       ReservedConcurrentExecutions: !If [ReservaConcorrencia, !Ref ConcorrenciaReservada, !Ref AWS::NoValue]
+      Environment:
+        Variables:
+          TABELA_DESAFIOS: !Ref TabelaDesafios
+          REMETENTE_EMAIL: !Ref IdentidadeRemetente
       Policies:
         - VPCAccessPolicy: {}
         - SSMParameterWithSlashPrefixReadPolicy:
             ParameterName: !Sub '/oficina/${Ambiente}/*'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TabelaDesafios
         - Statement:
             - Effect: Allow
               Action: [kms:Decrypt]
@@ -63,6 +101,12 @@ Resources:
               Condition:
                 StringEquals:
                   'kms:ViaService': !Sub 'ssm.${AWS::Region}.amazonaws.com'
+            - Effect: Allow
+              Action: [ses:SendEmail]
+              Resource: !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*'
+              Condition:
+                StringEquals:
+                  'ses:FromAddress': !Ref RemetenteEmail
 
   AuthorizerFunction:
     Type: AWS::Serverless::Function
@@ -73,7 +117,6 @@ Resources:
       Description: Valida o JWT das rotas protegidas do API Gateway.
       MemorySize: 256
       Timeout: 5
-      # Não acessa banco: só verifica assinatura. Fora da VPC, o cold start é menor.
       VpcConfig: !Ref AWS::NoValue
       Policies:
         - SSMParameterWithSlashPrefixReadPolicy:
