@@ -33,9 +33,16 @@ class CpfTest {
 
     @Test
     void deveRejeitarCnpjMesmoQueValido() {
-        // A Lambda autentica pessoa física por CPF; CNPJ tem 14 dígitos e não passa.
         assertThatThrownBy(() -> Cpf.de("11.222.333/0001-81"))
             .isInstanceOf(CpfInvalidoException.class);
+    }
+
+    @Test
+    void cpfsComOsMesmosDigitosSaoIguais() {
+        assertThat(Cpf.de("529.982.247-25")).isEqualTo(Cpf.de("52998224725"))
+            .hasSameHashCodeAs(Cpf.de("52998224725"))
+            .isNotEqualTo(Cpf.de("11144477735"))
+            .isNotEqualTo("52998224725");
     }
 
     @Test
