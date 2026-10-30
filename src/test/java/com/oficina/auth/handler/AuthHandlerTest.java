@@ -4,13 +4,14 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.LambdaLogger;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.oficina.auth.banco.ConsultaException;
 import com.oficina.auth.cliente.Cliente;
-import com.oficina.auth.cliente.ClienteRepository;
 import com.oficina.auth.cliente.StatusCliente;
 import com.oficina.auth.dto.ErroResponse;
 import com.oficina.auth.funcionario.Funcionario;
-import com.oficina.auth.funcionario.FuncionarioRepository;
+import com.oficina.auth.identidade.Cadastro;
+import com.oficina.auth.identidade.ConsultaIdentidade;
+import com.oficina.auth.identidade.ConsultaIdentidadeException;
+import com.oficina.auth.identidade.Papel;
 import com.oficina.auth.token.TokenIssuer;
 import com.oficina.auth.token.TokenValidator;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +32,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,23 +43,22 @@ class AuthHandlerTest {
     private static final String CPF_VALIDO = "529.982.247-25";
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    @Mock ClienteRepository repositorio;
-    @Mock FuncionarioRepository funcionarios;
+    @Mock ConsultaIdentidade identidades;
 
     private AuthHandler handler;
     private ContextoFake contexto;
 
     @BeforeEach
     void setUp() {
-        handler = new AuthHandler(repositorio, funcionarios, new TokenIssuer(SEGREDO));
+        handler = new AuthHandler(identidades, new TokenIssuer(SEGREDO));
         contexto = new ContextoFake();
     }
 
     @Test
     void clienteAtivoRecebeTokenValido() throws Exception {
         var id = UUID.randomUUID();
-        when(repositorio.buscarPorCpf(any()))
-            .thenReturn(Optional.of(new Cliente(id, "João", StatusCliente.ATIVO)));
+        when(identidades.buscar(eq(Papel.CLIENTE), any()))
+            .thenReturn(Optional.of(cliente(new Cliente(id, "João", StatusCliente.ATIVO))));
 
         var resposta = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
@@ -71,12 +72,12 @@ class AuthHandlerTest {
     }
 
     @Test
-    void cpfMalformadoDevolve400SemConsultarOBanco() throws Exception {
+    void cpfMalformadoDevolve400SemConsultarOOsService() throws Exception {
         var resposta = handler.handleRequest(evento("123.456.789-00"), contexto);
 
         assertThat(resposta.getStatusCode()).isEqualTo(400);
         assertThat(JSON.readTree(resposta.getBody()).get("erro").asText()).isEqualTo("CPF_INVALIDO");
-        verify(repositorio, never()).buscarPorCpf(any());
+        verify(identidades, never()).buscar(eq(Papel.CLIENTE), any());
     }
 
     @Test
@@ -87,7 +88,7 @@ class AuthHandlerTest {
 
     @Test
     void clienteInexistenteDevolve401Generico() throws Exception {
-        when(repositorio.buscarPorCpf(any())).thenReturn(Optional.empty());
+        when(identidades.buscar(eq(Papel.CLIENTE), any())).thenReturn(Optional.empty());
 
         var resposta = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
@@ -101,8 +102,8 @@ class AuthHandlerTest {
     @ParameterizedTest
     @EnumSource(value = StatusCliente.class, names = "ATIVO", mode = Mode.EXCLUDE)
     void clienteForaDeAtivoDevolve401Generico(StatusCliente status) throws Exception {
-        when(repositorio.buscarPorCpf(any()))
-            .thenReturn(Optional.of(new Cliente(UUID.randomUUID(), "João", status)));
+        when(identidades.buscar(eq(Papel.CLIENTE), any()))
+            .thenReturn(Optional.of(cliente(new Cliente(UUID.randomUUID(), "João", status))));
 
         var resposta = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
@@ -113,11 +114,11 @@ class AuthHandlerTest {
 
     @Test
     void cpfSemCadastroECadastroBloqueadoTemRespostaIdentica() throws Exception {
-        when(repositorio.buscarPorCpf(any())).thenReturn(Optional.empty());
+        when(identidades.buscar(eq(Papel.CLIENTE), any())).thenReturn(Optional.empty());
         var naoEncontrado = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
-        when(repositorio.buscarPorCpf(any()))
-            .thenReturn(Optional.of(new Cliente(UUID.randomUUID(), "João", StatusCliente.BLOQUEADO)));
+        when(identidades.buscar(eq(Papel.CLIENTE), any()))
+            .thenReturn(Optional.of(cliente(new Cliente(UUID.randomUUID(), "João", StatusCliente.BLOQUEADO))));
         var bloqueado = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
         assertThat(bloqueado.getStatusCode()).isEqualTo(naoEncontrado.getStatusCode());
@@ -126,20 +127,33 @@ class AuthHandlerTest {
     }
 
     @Test
-    void falhaDeBancoDevolve500SemVazarDetalhe() throws Exception {
-        when(repositorio.buscarPorCpf(any()))
-            .thenThrow(new ConsultaException("conexão recusada", null));
+    void osServiceIndisponivelDevolve503SemEmitirToken() throws Exception {
+        when(identidades.buscar(eq(Papel.CLIENTE), any()))
+            .thenThrow(new ConsultaIdentidadeException("OS Service respondeu com status 500."));
+
+        var resposta = handler.handleRequest(evento(CPF_VALIDO), contexto);
+
+        assertThat(resposta.getStatusCode()).isEqualTo(503);
+        var corpo = JSON.readTree(resposta.getBody());
+        assertThat(corpo.get("erro").asText()).isEqualTo("SERVICO_INDISPONIVEL");
+        assertThat(corpo.has("accessToken")).isFalse();
+    }
+
+    @Test
+    void falhaInesperadaDevolve500SemVazarDetalhe() {
+        when(identidades.buscar(eq(Papel.CLIENTE), any()))
+            .thenThrow(new IllegalStateException("detalhe interno"));
 
         var resposta = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
         assertThat(resposta.getStatusCode()).isEqualTo(500);
-        assertThat(resposta.getBody()).doesNotContain("conexão recusada");
+        assertThat(resposta.getBody()).doesNotContain("detalhe interno");
     }
 
     @Test
     void logNuncaDeveConterOCpfCompleto() {
-        when(repositorio.buscarPorCpf(any()))
-            .thenReturn(Optional.of(new Cliente(UUID.randomUUID(), "João", StatusCliente.ATIVO)));
+        when(identidades.buscar(eq(Papel.CLIENTE), any()))
+            .thenReturn(Optional.of(cliente(new Cliente(UUID.randomUUID(), "João", StatusCliente.ATIVO))));
 
         handler.handleRequest(evento(CPF_VALIDO), contexto);
 
@@ -151,20 +165,21 @@ class AuthHandlerTest {
 
     @Test
     void clienteRecebeTokenComPapelCliente() throws Exception {
-        when(repositorio.buscarPorCpf(any()))
-            .thenReturn(Optional.of(new Cliente(UUID.randomUUID(), "João", StatusCliente.ATIVO)));
+        when(identidades.buscar(eq(Papel.CLIENTE), any()))
+            .thenReturn(Optional.of(cliente(new Cliente(UUID.randomUUID(), "João", StatusCliente.ATIVO))));
 
         var resposta = handler.handleRequest(evento(CPF_VALIDO), contexto);
 
         var token = JSON.readTree(resposta.getBody()).get("accessToken").asText();
         assertThat(new TokenValidator(SEGREDO).validar(token).orElseThrow().get("role")).isEqualTo("CLIENTE");
-        verify(funcionarios, never()).buscarPorCpf(any());
+        verify(identidades, never()).buscar(eq(Papel.FUNCIONARIO), any());
     }
 
     @Test
     void funcionarioAtivoRecebeTokenComPapelFuncionario() throws Exception {
         var id = UUID.randomUUID();
-        when(funcionarios.buscarPorCpf(any())).thenReturn(Optional.of(new Funcionario(id, "Maria", true)));
+        when(identidades.buscar(eq(Papel.FUNCIONARIO), any()))
+            .thenReturn(Optional.of(funcionario(new Funcionario(id, "Maria", true))));
 
         var resposta = handler.handleRequest(eventoFuncionario(CPF_VALIDO), contexto);
 
@@ -173,21 +188,29 @@ class AuthHandlerTest {
         var claims = new TokenValidator(SEGREDO).validar(token).orElseThrow();
         assertThat(claims.getSubject()).isEqualTo(id.toString());
         assertThat(claims.get("role")).isEqualTo("FUNCIONARIO");
-        verify(repositorio, never()).buscarPorCpf(any());
+        verify(identidades, never()).buscar(eq(Papel.CLIENTE), any());
     }
 
     @Test
     void funcionarioInexistenteEInativoTemRespostaIdentica() throws Exception {
-        when(funcionarios.buscarPorCpf(any())).thenReturn(Optional.empty());
+        when(identidades.buscar(eq(Papel.FUNCIONARIO), any())).thenReturn(Optional.empty());
         var naoEncontrado = handler.handleRequest(eventoFuncionario(CPF_VALIDO), contexto);
 
-        when(funcionarios.buscarPorCpf(any()))
-            .thenReturn(Optional.of(new Funcionario(UUID.randomUUID(), "Maria", false)));
+        when(identidades.buscar(eq(Papel.FUNCIONARIO), any()))
+            .thenReturn(Optional.of(funcionario(new Funcionario(UUID.randomUUID(), "Maria", false))));
         var inativo = handler.handleRequest(eventoFuncionario(CPF_VALIDO), contexto);
 
         assertThat(naoEncontrado.getStatusCode()).isEqualTo(401);
         assertThat(inativo.getStatusCode()).isEqualTo(401);
         assertThat(inativo.getBody()).isEqualTo(naoEncontrado.getBody());
+    }
+
+    private static Cadastro cliente(Cliente cliente) {
+        return new Cadastro(cliente, "cliente@example.com");
+    }
+
+    private static Cadastro funcionario(Funcionario funcionario) {
+        return new Cadastro(funcionario, "funcionario@example.com");
     }
 
     private APIGatewayV2HTTPEvent evento(String cpf) {

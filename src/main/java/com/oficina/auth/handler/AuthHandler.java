@@ -5,21 +5,20 @@ import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.oficina.auth.banco.ConexaoJdbc;
-import com.oficina.auth.cliente.ClienteRepository;
-import com.oficina.auth.config.Configuracao;
+import com.oficina.auth.config.ConfiguracaoAutenticacao;
 import com.oficina.auth.cpf.Cpf;
 import com.oficina.auth.cpf.CpfInvalidoException;
 import com.oficina.auth.dto.AutenticacaoRequest;
 import com.oficina.auth.dto.ErroResponse;
 import com.oficina.auth.dto.TokenResponse;
-import com.oficina.auth.funcionario.FuncionarioRepository;
+import com.oficina.auth.identidade.ConsultaIdentidade;
+import com.oficina.auth.identidade.ConsultaIdentidadeException;
+import com.oficina.auth.identidade.ConsultaIdentidadeHttp;
 import com.oficina.auth.identidade.Identidade;
 import com.oficina.auth.identidade.Papel;
 import com.oficina.auth.token.TokenIssuer;
 
 import java.util.Map;
-import java.util.Optional;
 
 public class AuthHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
 
@@ -27,21 +26,20 @@ public class AuthHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private final ClienteRepository clientes;
-    private final FuncionarioRepository funcionarios;
+    private final ConsultaIdentidade identidades;
     private final TokenIssuer emissor;
 
     public AuthHandler() {
-        var config = Configuracao.carregar();
-        var conexao = new ConexaoJdbc(config.jdbcUrl(), config.dbUsuario(), config.dbSenha());
-        this.clientes = new ClienteRepository(conexao);
-        this.funcionarios = new FuncionarioRepository(conexao);
-        this.emissor = new TokenIssuer(config.jwtSecret());
+        this(ConfiguracaoAutenticacao.carregar());
     }
 
-    AuthHandler(ClienteRepository clientes, FuncionarioRepository funcionarios, TokenIssuer emissor) {
-        this.clientes = clientes;
-        this.funcionarios = funcionarios;
+    private AuthHandler(ConfiguracaoAutenticacao config) {
+        this(new ConsultaIdentidadeHttp(config.urlOsService(), config.chaveInterna()),
+            new TokenIssuer(config.jwtSecret()));
+    }
+
+    AuthHandler(ConsultaIdentidade identidades, TokenIssuer emissor) {
+        this.identidades = identidades;
         this.emissor = emissor;
     }
 
@@ -56,16 +54,14 @@ public class AuthHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         }
 
         try {
-            Optional<? extends Identidade> encontrado = papel == Papel.FUNCIONARIO
-                ? funcionarios.buscarPorCpf(cpf)
-                : clientes.buscarPorCpf(cpf);
+            var encontrado = identidades.buscar(papel, cpf);
 
             if (encontrado.isEmpty()) {
                 logar(context, "nao_encontrado", papel, cpf, null);
                 return responder(401, ErroResponse.autenticacaoRecusada());
             }
 
-            var identidade = encontrado.get();
+            var identidade = encontrado.get().identidade();
             if (!identidade.podeAutenticar()) {
                 logar(context, "sem_permissao", papel, cpf, identidade);
                 return responder(401, ErroResponse.autenticacaoRecusada());
@@ -75,6 +71,9 @@ public class AuthHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
             return responder(200, TokenResponse.bearer(
                 emissor.emitir(identidade, cpf), TokenIssuer.EXPIRACAO_SEGUNDOS));
 
+        } catch (ConsultaIdentidadeException e) {
+            logar(context, "os_indisponivel", papel, cpf, null);
+            return responder(503, ErroResponse.servicoIndisponivel());
         } catch (Exception e) {
             if (context != null) {
                 context.getLogger().log("erro=ERRO_INTERNO detalhe=" + e.getMessage());
