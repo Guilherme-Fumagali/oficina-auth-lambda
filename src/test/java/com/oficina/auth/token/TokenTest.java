@@ -67,7 +67,6 @@ class TokenTest {
         var token = emissor.emitir(
             new Cliente(UUID.randomUUID(), "Ana", StatusCliente.ATIVO), Cpf.de("52998224725"));
 
-        // Altera o payload mantendo header e assinatura: a verificação HMAC precisa recusar.
         var partes = token.split("\\.");
         var payloadOriginal = new String(
             java.util.Base64.getUrlDecoder().decode(partes[1]), java.nio.charset.StandardCharsets.UTF_8);
