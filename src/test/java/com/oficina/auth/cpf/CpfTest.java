@@ -39,6 +39,14 @@ class CpfTest {
     }
 
     @Test
+    void cpfsComOsMesmosDigitosSaoIguais() {
+        assertThat(Cpf.de("529.982.247-25")).isEqualTo(Cpf.de("52998224725"))
+            .hasSameHashCodeAs(Cpf.de("52998224725"))
+            .isNotEqualTo(Cpf.de("11144477735"))
+            .isNotEqualTo("52998224725");
+    }
+
+    @Test
     void deveMascararParaLogExpondoApenasOsTresUltimosDigitos() {
         var cpf = Cpf.de("529.982.247-25");
 
