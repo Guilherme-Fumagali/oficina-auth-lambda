@@ -38,4 +38,12 @@ final class FonteConfiguracao {
         }
         return valores;
     }
+
+    String variavel(String nome) {
+        var valor = ambiente.get(nome);
+        if (valor == null || valor.isBlank()) {
+            throw new IllegalStateException("Variável de ambiente " + nome + " não definida.");
+        }
+        return valor;
+    }
 }

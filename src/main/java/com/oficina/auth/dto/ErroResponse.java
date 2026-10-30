@@ -2,14 +2,22 @@ package com.oficina.auth.dto;
 
 public record ErroResponse(String erro, String mensagem) {
 
-    public static final String FALHA_GENERICA = "Não foi possível autenticar com o CPF informado.";
+    public static final String FALHA_CONFIRMACAO = "Código inválido ou expirado.";
 
     public static ErroResponse cpfInvalido(String detalhe) {
         return new ErroResponse("CPF_INVALIDO", detalhe);
     }
 
+    public static ErroResponse requisicaoInvalida(String detalhe) {
+        return new ErroResponse("REQUISICAO_INVALIDA", detalhe);
+    }
+
     public static ErroResponse autenticacaoRecusada() {
-        return new ErroResponse("AUTENTICACAO_RECUSADA", FALHA_GENERICA);
+        return new ErroResponse("AUTENTICACAO_RECUSADA", FALHA_CONFIRMACAO);
+    }
+
+    public static ErroResponse rotaInexistente() {
+        return new ErroResponse("ROTA_INEXISTENTE", "Rota não atendida por esta função.");
     }
 
     public static ErroResponse servicoIndisponivel() {

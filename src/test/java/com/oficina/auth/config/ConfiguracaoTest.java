@@ -12,11 +12,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ConfiguracaoTest {
 
+    private static final Map<String, String> AMBIENTE_DA_FUNCAO = Map.of(
+        "TABELA_DESAFIOS", "oficina-auth-desafios-staging",
+        "REMETENTE_EMAIL", "nao-responda@oficina.example.com");
+
     private final List<String> consultados = new ArrayList<>();
-    private final Map<String, String> ssm = new HashMap<>(Map.of(
+    private final Map<String, String> ssm = Map.of(
         "jwt-secret", "segredo-jwt-do-ssm",
         "chave-interna", "chave-do-ssm",
-        "nlb-dns", "nlb-interno.elb.us-east-1.amazonaws.com"));
+        "otp-segredo", "segredo-otp-do-ssm",
+        "nlb-dns", "nlb-interno.elb.us-east-1.amazonaws.com");
 
     private final LeitorParametros leitor = nomes -> {
         consultados.addAll(nomes);
@@ -46,21 +51,46 @@ class ConfiguracaoTest {
     }
 
     @Test
+    void autenticacaoLeOsQuatroParametrosEAsVariaveisDaFuncao() {
+        var config = ConfiguracaoAutenticacao.de(new FonteConfiguracao(AMBIENTE_DA_FUNCAO, leitor));
+
+        assertThat(consultados).containsExactlyInAnyOrder("jwt-secret", "chave-interna", "otp-segredo", "nlb-dns");
+        assertThat(config.jwtSecret()).isEqualTo("segredo-jwt-do-ssm");
+        assertThat(config.chaveInterna()).isEqualTo("chave-do-ssm");
+        assertThat(config.otpSegredo()).isEqualTo("segredo-otp-do-ssm");
+        assertThat(config.urlOsService()).isEqualTo("http://nlb-interno.elb.us-east-1.amazonaws.com");
+        assertThat(config.tabelaDesafios()).isEqualTo("oficina-auth-desafios-staging");
+        assertThat(config.remetenteEmail()).isEqualTo("nao-responda@oficina.example.com");
+    }
+
+    @Test
     void autenticacaoConsultaNoSsmApenasOQueFaltaNoAmbiente() {
-        var ambiente = Map.of("JWT_SECRET", "segredo-local", "CHAVE_INTERNA", " ");
+        var ambiente = new HashMap<>(AMBIENTE_DA_FUNCAO);
+        ambiente.put("JWT_SECRET", "segredo-local");
+        ambiente.put("OTP_SEGREDO", "segredo-otp-local");
+        ambiente.put("NLB_DNS", "localhost:8080");
+        ambiente.put("CHAVE_INTERNA", " ");
 
         var config = ConfiguracaoAutenticacao.de(new FonteConfiguracao(ambiente, leitor));
 
-        assertThat(consultados).containsExactlyInAnyOrder("chave-interna", "nlb-dns");
+        assertThat(consultados).containsExactly("chave-interna");
         assertThat(config.jwtSecret()).isEqualTo("segredo-local");
+        assertThat(config.otpSegredo()).isEqualTo("segredo-otp-local");
+        assertThat(config.urlOsService()).isEqualTo("http://localhost:8080");
         assertThat(config.chaveInterna()).isEqualTo("chave-do-ssm");
     }
 
     @Test
-    void urlDoOsServiceApontaParaOListenerDoNlb() {
-        var config = ConfiguracaoAutenticacao.de(new FonteConfiguracao(Map.of(), leitor));
-
-        assertThat(config.urlOsService()).isEqualTo("http://nlb-interno.elb.us-east-1.amazonaws.com");
+    void tabelaERemetenteSaoObrigatorios() {
+        assertThatThrownBy(() -> ConfiguracaoAutenticacao.de(new FonteConfiguracao(
+                Map.of("REMETENTE_EMAIL", "nao-responda@oficina.example.com"), leitor)))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("TABELA_DESAFIOS");
+        assertThatThrownBy(() -> ConfiguracaoAutenticacao.de(new FonteConfiguracao(
+                Map.of("TABELA_DESAFIOS", "oficina-auth-desafios-staging", "REMETENTE_EMAIL", ""), leitor)))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("REMETENTE_EMAIL");
+        assertThat(consultados).isEmpty();
     }
 
     @Test
@@ -69,8 +99,8 @@ class ConfiguracaoTest {
             throw new IllegalStateException("Parâmetros ausentes no SSM: " + String.join(", ", nomes));
         };
 
-        assertThatThrownBy(() -> ConfiguracaoAutenticacao.de(new FonteConfiguracao(Map.of(), ausente)))
+        assertThatThrownBy(() -> ConfiguracaoAutenticacao.de(new FonteConfiguracao(AMBIENTE_DA_FUNCAO, ausente)))
             .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("jwt-secret");
+            .hasMessageContaining("otp-segredo");
     }
 }

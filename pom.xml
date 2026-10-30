@@ -9,7 +9,7 @@
     <version>1.0.0</version>
     <packaging>jar</packaging>
     <name>oficina-auth-lambda</name>
-    <description>Autenticação por CPF — Tech Challenge Fase 3</description>
+    <description>Autenticação por CPF com segundo fator por e-mail — Tech Challenge Fase 4</description>
 
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
@@ -101,20 +101,8 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-junit-jupiter</artifactId>
-            <version>5.14.2</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>localstack</artifactId>
-            <version>${testcontainers.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
