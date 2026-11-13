@@ -1,0 +1,11 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /auth/funcionarios/confirmacao",
+  "rawPath": "/auth/funcionarios/confirmacao",
+  "headers": { "content-type": "application/json" },
+  "requestContext": {
+    "http": { "method": "POST", "path": "/auth/funcionarios/confirmacao", "protocol": "HTTP/1.1" }
+  },
+  "body": "{\"desafioId\":\"6f1c0e3e-5a4b-4c2d-9e8f-0123456789ab\",\"codigo\":\"123456\"}",
+  "isBase64Encoded": false
+}

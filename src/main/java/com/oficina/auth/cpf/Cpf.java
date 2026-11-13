@@ -45,6 +45,16 @@ public final class Cpf {
     }
 
     @Override
+    public boolean equals(Object outro) {
+        return outro instanceof Cpf cpf && valor.equals(cpf.valor);
+    }
+
+    @Override
+    public int hashCode() {
+        return valor.hashCode();
+    }
+
+    @Override
     public String toString() {
         return mascarado();
     }
