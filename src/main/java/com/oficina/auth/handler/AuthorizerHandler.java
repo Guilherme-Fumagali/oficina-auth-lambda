@@ -3,7 +3,7 @@ package com.oficina.auth.handler;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2CustomAuthorizerEvent;
-import com.oficina.auth.config.Configuracao;
+import com.oficina.auth.config.ConfiguracaoAutorizador;
 import com.oficina.auth.token.TokenValidator;
 
 import java.util.HashMap;
@@ -15,7 +15,7 @@ public class AuthorizerHandler
     private final TokenValidator validador;
 
     public AuthorizerHandler() {
-        this.validador = new TokenValidator(Configuracao.carregar().jwtSecret());
+        this.validador = new TokenValidator(ConfiguracaoAutorizador.carregar().jwtSecret());
     }
 
     AuthorizerHandler(TokenValidator validador) {

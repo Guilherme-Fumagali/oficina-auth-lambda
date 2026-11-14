@@ -71,7 +71,16 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      REMETENTE_EMAIL: ${{ vars.REMETENTE_EMAIL }}
     steps:
+      - name: Conferir remetente do e-mail
+        run: |
+          if [ -z "$REMETENTE_EMAIL" ]; then
+            echo "::error::Defina a variável REMETENTE_EMAIL com o remetente dos códigos de acesso."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: aws-actions/configure-aws-credentials@v4
@@ -100,6 +109,7 @@ jobs:
             --parameter-overrides Ambiente=${AMBIENTE} \
                 SubnetIds=/oficina/${AMBIENTE}/private-subnet-ids \
                 SecurityGroupId=/oficina/${AMBIENTE}/lambda-security-group-id \
+                RemetenteEmail="${REMETENTE_EMAIL}" \
             --capabilities CAPABILITY_IAM \
             --resolve-s3 \
             --no-confirm-changeset \

@@ -1,0 +1,11 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /auth/funcionarios",
+  "rawPath": "/auth/funcionarios",
+  "headers": { "content-type": "application/json" },
+  "requestContext": {
+    "http": { "method": "POST", "path": "/auth/funcionarios", "protocol": "HTTP/1.1" }
+  },
+  "body": "{\"cpf\":\"390.533.447-05\"}",
+  "isBase64Encoded": false
+}
